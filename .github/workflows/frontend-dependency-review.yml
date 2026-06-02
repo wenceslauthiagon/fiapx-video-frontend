@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - develop
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -18,5 +19,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Check Dependency Graph support
+        id: depgraph
+        shell: bash
+        run: |
+          status=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer ${{ github.token }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/dependency-graph/sbom")
+
+          if [ "$status" = "200" ]; then
+            echo "supported=true" >> "$GITHUB_OUTPUT"
+            echo "Dependency Graph is available."
+          else
+            echo "supported=false" >> "$GITHUB_OUTPUT"
+            echo "Dependency Graph not available for this repository (HTTP $status)."
+          fi
+
       - name: Dependency review
+        if: steps.depgraph.outputs.supported == 'true'
         uses: actions/dependency-review-action@v4
+
+      - name: Dependency review skipped
+        if: steps.depgraph.outputs.supported != 'true'
+        run: echo "Skipping dependency review because Dependency Graph is unavailable for this repository."
