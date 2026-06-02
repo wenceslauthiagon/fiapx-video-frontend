@@ -1,27 +1,26 @@
-name: Frontend Quality
+name: Frontend Deploy Pages
 
 on:
   push:
     branches:
       - main
-      - develop
-      - feature/*
-  pull_request:
-    branches:
-      - main
-      - develop
   workflow_dispatch:
 
 permissions:
   contents: read
+  pages: write
+  id-token: write
 
 concurrency:
-  group: frontend-${{ github.workflow }}-${{ github.ref }}
+  group: frontend-pages
   cancel-in-progress: true
 
 jobs:
-  quality:
+  deploy-pages:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
       - name: Checkout
@@ -46,14 +45,14 @@ jobs:
       - name: Run build
         run: npm run build
 
-      - name: Security audit (high)
-        run: npm audit --audit-level=high
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
 
-      - name: Upload build artifact
-        if: success()
-        uses: actions/upload-artifact@v4
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          name: frontend-dist
           path: dist
-          if-no-files-found: error
 
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
