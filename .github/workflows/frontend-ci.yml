@@ -30,8 +30,30 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Check dependency graph status
+        id: dependency-graph
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: repository } = await github.rest.repos.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo
+            })
+            const reportedStatus = repository.security_and_analysis?.dependency_graph?.status
+            if (!reportedStatus) {
+              core.warning('Dependency graph status is unavailable from the API response. Treating it as disabled.')
+            }
+            const status = reportedStatus ?? 'disabled'
+            core.info(`Dependency graph status: ${status}`)
+            core.setOutput('enabled', status === 'enabled' ? 'true' : 'false')
+
       - name: Dependency review
+        if: steps.dependency-graph.outputs.enabled == 'true'
         uses: actions/dependency-review-action@v4
+
+      - name: Dependency review not available
+        if: steps.dependency-graph.outputs.enabled != 'true'
+        run: echo "Dependency graph is disabled for this repository. Skipping dependency review."
 
   quality:
     runs-on: ubuntu-latest
