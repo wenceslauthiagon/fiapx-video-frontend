@@ -1,4 +1,4 @@
-name: Frontend CI
+name: Frontend CI/CD
 
 on:
   push:
@@ -10,20 +10,60 @@ on:
     branches:
       - main
       - develop
+  workflow_dispatch:
 
 permissions:
   contents: read
+  pull-requests: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: frontend-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  lint-and-build:
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Check dependency graph status
+        id: dependency-graph
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: repository } = await github.rest.repos.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo
+            })
+            const reportedStatus = repository.security_and_analysis?.dependency_graph?.status
+            if (!reportedStatus) {
+              core.warning('Dependency graph status is unavailable from the API response. Treating it as disabled.')
+            }
+            const status = reportedStatus ?? 'disabled'
+            core.info(`Dependency graph status: ${status}`)
+            core.setOutput('enabled', status === 'enabled' ? 'true' : 'false')
+
+      - name: Dependency review
+        if: steps.dependency-graph.outputs.enabled == 'true'
+        uses: actions/dependency-review-action@v4
+
+      - name: Dependency review not available
+        if: steps.dependency-graph.outputs.enabled != 'true'
+        run: echo "Dependency graph is disabled for this repository. Skipping dependency review."
+
+  quality:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "22"
           cache: npm
@@ -35,5 +75,51 @@ jobs:
       - name: Run lint
         run: npm run lint
 
+      - name: Run tests (if present)
+        run: npm run test --if-present
+
       - name: Run build
         run: npm run build
+
+      - name: Security audit (high)
+        run: npm audit --audit-level=high
+
+  deploy-pages:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    needs: quality
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run lint
+        run: npm run lint
+
+      - name: Run build (production)
+        run: npm run build
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
